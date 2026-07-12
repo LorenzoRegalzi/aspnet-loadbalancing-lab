@@ -104,6 +104,27 @@ Follow the logs:
 docker-compose logs -f
 ```
 
+## Reproducible failover experiment
+
+To run the full "stop one backend under load" experiment and save logs in one shot:
+
+```bash
+./scripts/run-failover-experiment.sh
+```
+
+The script writes artifacts under `results/failover-<timestamp>/`:
+
+- `events.log` - major steps and timing
+- `requests.tsv` - per-request status, hostname, and timing
+- `nginx.log` - nginx logs during the experiment
+- `summary.txt` - quick counts (success/failure and hostname distribution)
+
+Tune behavior with environment variables:
+
+```bash
+REQUESTS=200 STOP_AT=60 INTERVAL_SECONDS=0.1 ./scripts/run-failover-experiment.sh
+```
+
 ## What I learned
 
 - `expose` makes a port available to other containers on the same Docker network, but not to the host machine.
