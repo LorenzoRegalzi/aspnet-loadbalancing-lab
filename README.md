@@ -98,6 +98,68 @@ Stop the stack:
 docker-compose down
 ```
 
+## Failover Experiment Results
+
+To measure how well nginx handles upstream failures, we created an automated failover test:
+
+- The test sends 120 requests at a controlled rate (~5 requests/second).
+- At request #40, we stop the `app1` container.
+- We capture all responses and measure success vs. timeout/error rates.
+
+### Baseline (nginx default, no failover tuning)
+
+- **Total requests**: 120
+- **Success (HTTP 200)**: 99
+- **Failures (timeout/error)**: 21
+- **Failure rate**: 17.5%
+- **Issue**: nginx kept retrying the stopped backend repeatedly, causing client timeouts before marking it as down.
+
+### With Failover Tuning
+
+Applied the following nginx configuration in `upstream` and `location`:
+
+```nginx
+upstream app_backend {
+    server app1:8080 max_fails=1 fail_timeout=5s;
+    server app2:8080 max_fails=1 fail_timeout=5s;
+}
+
+location / {
+    proxy_pass http://app_backend;
+    # ... headers ...
+    
+    proxy_connect_timeout 1s;
+    proxy_read_timeout 2s;
+    proxy_next_upstream error timeout http_502 http_503 http_504;
+    proxy_next_upstream_tries 3;
+}
+```
+
+**Results**:
+
+- **Total requests**: 120
+- **Success (HTTP 200)**: 120
+- **Failures (timeout/error)**: 0
+- **Failure rate**: 0%
+- **Improvement**: +17.5% success rate; **100% of requests succeeded**.
+
+### How the Tuning Works
+
+1. **`max_fails=1 fail_timeout=5s`**: After 1 failure, the backend is marked unhealthy for 5 seconds.
+2. **`proxy_connect_timeout 1s`**: If nginx can't connect within 1 second, fail immediately.
+3. **`proxy_read_timeout 2s`**: If no response bytes arrive within 2 seconds, timeout.
+4. **`proxy_next_upstream error timeout`**: When those conditions occur, retry on another backend.
+5. **`proxy_next_upstream_tries 3`**: Try up to 3 different upstreams before giving up.
+
+This creates a **fail-fast retry loop**: instead of waiting for a stuck connection, nginx quickly detects failure and transparently retries on the healthy backend. The client never sees the outage.
+
+### Next Steps
+
+- Implement **active health checks** (periodic health probes) instead of passive (error-based) detection.
+- Add **database replication** to the lab (Phase 3).
+- Test with different `max_fails` and `fail_timeout` values to find the optimal balance.
+- Experiment with Azure cross-region failover (Phase 4).
+
 Follow the logs:
 
 ```bash
